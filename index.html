@@ -1,28 +1,82 @@
 <!DOCTYPE html>
-<html lang="en">
+<html>
 <head>
-  <meta charset="UTF-8">
-  <title>Trail Planner Pro</title>
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-  <link rel="stylesheet" href="style.css">
+    <title>Quick Route Plotter</title>
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <style>
+        #map { height: 90vh; width: 100%; cursor: crosshair; }
+        .controls { height: 10vh; display: flex; align-items: center; justify-content: space-around; background: #f8f9fa; }
+        #info { font-family: sans-serif; font-weight: bold; color: #2c3e50; }
+        button { padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; }
+    </style>
 </head>
 <body>
+    <div id="map"></div>
+    <div class="controls">
+        <div id="info">Distance: 0.00 km</div>
+        <button onclick="exportGPX()">Export GPX</button>
+    </div>
 
-<div id="map"></div>
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <script>
+        const API_KEY = 'bab71613-334e-47a1-8d70-135070dabc0e'; // Your key
+        const map = L.map('map').setView([53.3811, -1.4701], 13); // Sheffield Default
+        let routePoints = [];
+        let totalDistance = 0;
+        let polyline = L.polyline([], {color: 'red', weight: 5}).addTo(map);
 
-<div id="controls">
-  <div class="stats">
-    <span id="distance">0.00 km</span>
-  </div>
-  <div class="buttons">
-    <button onclick="undo()" title="Remove last segment">Undo</button>
-    <button onclick="clearRoute()" class="danger">Clear</button>
-    <button onclick="exportGPX()" class="success">Export GPX</button>
-  </div>
-</div>
+        // MAPSFORGE LOOK: OpenTopoMap is the best online equivalent to Mapsforge rendering
+        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+            maxZoom: 17,
+            attribution: '© OpenTopoMap'
+        }).addTo(map);
 
-<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-<script src="app.js"></script>
+        map.on('click', async function(e) {
+            const newPoint = e.latlng;
+            
+            if (routePoints.length > 0) {
+                const lastPoint = routePoints[routePoints.length - 1];
+                // Request snapping to FOOTPATHS specifically
+                const url = `https://graphhopper.com/api/1/route?point=${lastPoint.lat},${lastPoint.lng}&point=${newPoint.lat},${newPoint.lng}&profile=hike&points_encoded=false&key=${API_KEY}`;
+                
+                try {
+                    const response = await fetch(url);
+                    const data = await response.json();
+                    const path = data.paths[0];
+                    
+                    // Add snapped points to our line
+                    path.points.coordinates.forEach(coord => {
+                        polyline.addLatLng([coord[1], coord[0]]);
+                    });
+                    
+                    totalDistance += path.distance;
+                    document.getElementById('info').innerText = `Distance: ${(totalDistance/1000).toFixed(2)} km`;
+                } catch (err) {
+                    alert("Couldn't find a footpath here!");
+                }
+            }
+            
+            routePoints.push(newPoint);
+            L.circleMarker(newPoint, {radius: 5, color: 'blue'}).addTo(map);
+        });
+
+        function exportGPX() {
+            const coords = polyline.getLatLngs();
+            if (coords.length === 0) return alert("Plot a route first!");
+            
+            let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="FootpathPlotter"><trk><trkseg>`;
+            coords.forEach(latlng => {
+                gpx += `<trkpt lat="${latlng.lat}" lon="${latlng.lng}"></trkpt>`;
+            });
+            gpx += `</trkseg></trk></gpx>`;
+
+            const blob = new Blob([gpx], {type: 'application/gpx+xml'});
+            const url = URL.createObjectURL(blob);
+            const a = document.createElement('a');
+            a.href = url;
+            a.download = 'route.gpx';
+            a.click();
+        }
+    </script>
 </body>
 </html>
