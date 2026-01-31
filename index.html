@@ -1,81 +1,137 @@
 <!DOCTYPE html>
 <html>
 <head>
-    <title>Quick Route Plotter</title>
+    <title>OS-Style Route Planner</title>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
     <style>
-        #map { height: 90vh; width: 100%; cursor: crosshair; }
-        .controls { height: 10vh; display: flex; align-items: center; justify-content: space-around; background: #f8f9fa; }
-        #info { font-family: sans-serif; font-weight: bold; color: #2c3e50; }
-        button { padding: 10px 20px; background: #27ae60; color: white; border: none; border-radius: 5px; cursor: pointer; }
+        body { margin: 0; padding: 0; font-family: sans-serif; }
+        #map { height: 85vh; width: 100vw; background: #e0e0e0; }
+        .ui-panel { 
+            height: 15vh; 
+            display: flex; 
+            align-items: center; 
+            justify-content: space-around; 
+            background: #2c3e50; 
+            color: white; 
+            padding: 0 20px;
+        }
+        .stats { font-size: 1.2rem; }
+        button { 
+            padding: 12px 24px; 
+            background: #27ae60; 
+            color: white; 
+            border: none; 
+            border-radius: 8px; 
+            cursor: pointer; 
+            font-weight: bold;
+        }
+        button:hover { background: #219150; }
+        button.clear { background: #c0392b; }
     </style>
 </head>
 <body>
+
     <div id="map"></div>
-    <div class="controls">
-        <div id="info">Distance: 0.00 km</div>
+    
+    <div class="ui-panel">
+        <div class="stats">Distance: <span id="dist">0.00</span> km</div>
         <button onclick="exportGPX()">Export GPX</button>
+        <button class="clear" onclick="clearRoute()">Clear All</button>
     </div>
 
     <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
     <script>
-        const API_KEY = 'bab71613-334e-47a1-8d70-135070dabc0e'; // Your key
-        const map = L.map('map').setView([53.3811, -1.4701], 13); // Sheffield Default
-        let routePoints = [];
-        let totalDistance = 0;
-        let polyline = L.polyline([], {color: 'red', weight: 5}).addTo(map);
+        const API_KEY = 'bab71613-334e-47a1-8d70-135070dabc0e';
+        
+        // 1. Initialize Map
+        const map = L.map('map').setView([53.3811, -1.4701], 13); // Sheffield
 
-        // MAPSFORGE LOOK: OpenTopoMap is the best online equivalent to Mapsforge rendering
-        L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
-            maxZoom: 17,
-            attribution: '© OpenTopoMap'
+        // 2. Load the Map Layer (Using Standard OSM for maximum reliability)
+        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+            attribution: '© OpenStreetMap contributors'
         }).addTo(map);
 
-        map.on('click', async function(e) {
-            const newPoint = e.latlng;
+        let legs = []; 
+        let polyline = L.polyline([], {color: '#3498db', weight: 6, opacity: 0.8}).addTo(map);
+        let totalDistance = 0;
+
+        // 3. Click to Route Logic
+        map.on('click', async (e) => {
+            const newPoint = [e.latlng.lat, e.latlng.lng];
             
-            if (routePoints.length > 0) {
-                const lastPoint = routePoints[routePoints.length - 1];
-                // Request snapping to FOOTPATHS specifically
-                const url = `https://graphhopper.com/api/1/route?point=${lastPoint.lat},${lastPoint.lng}&point=${newPoint.lat},${newPoint.lng}&profile=hike&points_encoded=false&key=${API_KEY}`;
+            if (legs.length > 0) {
+                const lastLeg = legs[legs.length - 1];
+                const lastPoint = lastLeg[lastLeg.length - 1];
+
+                const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
                 
+                const body = {
+                    "points": [[lastPoint[1], lastPoint[0]], [newPoint[1], newPoint[0]]],
+                    "profile": "hike",
+                    "points_encoded": false,
+                    "ch.disable": true
+                };
+
                 try {
-                    const response = await fetch(url);
-                    const data = await response.json();
-                    const path = data.paths[0];
-                    
-                    // Add snapped points to our line
-                    path.points.coordinates.forEach(coord => {
-                        polyline.addLatLng([coord[1], coord[0]]);
+                    const res = await fetch(url, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(body)
                     });
-                    
-                    totalDistance += path.distance;
-                    document.getElementById('info').innerText = `Distance: ${(totalDistance/1000).toFixed(2)} km`;
+                    const data = await res.json();
+
+                    if (data.paths && data.paths.length > 0) {
+                        const path = data.paths[0];
+                        const snappedCoords = path.points.coordinates.map(c => [c[1], c[0]]);
+                        legs.push(snappedCoords);
+                        totalDistance += path.distance;
+                    } else {
+                        throw new Error();
+                    }
                 } catch (err) {
-                    alert("Couldn't find a footpath here!");
+                    // If footpath fails, do a straight line
+                    legs.push([[lastPoint[0], lastPoint[1]], [newPoint[0], newPoint[1]]]);
                 }
+            } else {
+                legs.push([newPoint]);
             }
-            
-            routePoints.push(newPoint);
-            L.circleMarker(newPoint, {radius: 5, color: 'blue'}).addTo(map);
+
+            render();
         });
+
+        function render() {
+            const allCoords = legs.flat();
+            polyline.setLatLngs(allCoords);
+            document.getElementById('dist').innerText = (totalDistance / 1000).toFixed(2);
+        }
+
+        function clearRoute() {
+            legs = [];
+            totalDistance = 0;
+            render();
+        }
 
         function exportGPX() {
             const coords = polyline.getLatLngs();
-            if (coords.length === 0) return alert("Plot a route first!");
+            if (coords.length < 2) return alert("Click on the map to start your route!");
             
-            let gpx = `<?xml version="1.0" encoding="UTF-8"?><gpx version="1.1" creator="FootpathPlotter"><trk><trkseg>`;
-            coords.forEach(latlng => {
-                gpx += `<trkpt lat="${latlng.lat}" lon="${latlng.lng}"></trkpt>`;
+            let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="MyPlanner" xmlns="http://www.topografix.com/GPX/1/1">
+  <trk><name>My Hike</name><trkseg>`;
+            
+            coords.forEach(p => {
+                gpx += `\n    <trkpt lat="${p.lat}" lon="${p.lng}"></trkpt>`;
             });
-            gpx += `</trkseg></trk></gpx>`;
+
+            gpx += `\n  </trkseg></trk></gpx>`;
 
             const blob = new Blob([gpx], {type: 'application/gpx+xml'});
-            const url = URL.createObjectURL(blob);
-            const a = document.createElement('a');
-            a.href = url;
-            a.download = 'route.gpx';
-            a.click();
+            const link = document.createElement('a');
+            link.href = URL.createObjectURL(blob);
+            link.download = 'route.gpx';
+            link.click();
         }
     </script>
 </body>
