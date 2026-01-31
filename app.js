@@ -24,7 +24,7 @@ const router = L.Routing.control({
 
   router: L.Routing.graphHopper(GRAPH_HOPPER_KEY, {
     urlParameters: {
-      vehicle: "hike"
+      vehicle: "foot"
     }
   }),
 
