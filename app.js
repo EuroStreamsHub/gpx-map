@@ -3,13 +3,13 @@
 // =====================
 const map = L.map('map').setView([51.505, -0.09], 13);
 
-// OpenTopoMap – excellent for footpaths / PROWs
+// OpenTopoMap – good footpath visibility
 L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenTopoMap (CC-BY-SA)'
 }).addTo(map);
 
 // =====================
-// ROUTING (GraphHopper – FOOT)
+// ROUTING (GraphHopper – HIKING)
 // =====================
 const GRAPH_HOPPER_KEY = "bab71613-334e-47a1-8d70-135070dabc0e";
 
@@ -24,7 +24,7 @@ const router = L.Routing.control({
 
   router: L.Routing.graphHopper(GRAPH_HOPPER_KEY, {
     urlParameters: {
-      vehicle: "foot"
+      vehicle: "hike"
     }
   }),
 
@@ -34,9 +34,10 @@ const router = L.Routing.control({
 }).addTo(map);
 
 // =====================
-// ADD WAYPOINT (TAP)
+// CLICK TO ADD WAYPOINT
 // =====================
 map.on('click', e => {
+  console.log("Clicked:", e.latlng); // DEBUG – confirms tap works
   waypoints.push(L.latLng(e.latlng.lat, e.latlng.lng));
   router.setWaypoints(waypoints);
 });
@@ -49,6 +50,14 @@ router.on('routesfound', e => {
   const km = route.summary.totalDistance / 1000;
   document.getElementById("distance").innerText =
     `Distance: ${km.toFixed(2)} km`;
+});
+
+// =====================
+// ROUTING ERROR (important)
+// =====================
+router.on('routingerror', e => {
+  alert("Routing failed here.\nTry clicking closer to a mapped footpath.");
+  console.error(e);
 });
 
 // =====================
@@ -75,7 +84,10 @@ function clearRoute() {
 // =====================
 function exportGPX() {
   const routes = router.getRoutes();
-  if (!routes || routes.length === 0) return;
+  if (!routes || routes.length === 0) {
+    alert("No route to export");
+    return;
+  }
 
   const coords = routes[0].coordinates;
 
@@ -98,12 +110,8 @@ xmlns="http://www.topografix.com/GPX/1/1">
 </gpx>`;
 
   const blob = new Blob([gpx], { type: "application/gpx+xml" });
-  const url = URL.createObjectURL(blob);
-
   const a = document.createElement("a");
-  a.href = url;
+  a.href = URL.createObjectURL(blob);
   a.download = "route.gpx";
   a.click();
-
-  URL.revokeObjectURL(url);
 }
