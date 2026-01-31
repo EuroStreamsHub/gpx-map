@@ -3,33 +3,28 @@
 // =====================
 const map = L.map('map').setView([51.505, -0.09], 13);
 
-// OpenTopoMap – good footpath visibility
+// OpenTopoMap – clear footpaths
 L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenTopoMap (CC-BY-SA)'
 }).addTo(map);
 
 // =====================
-// ROUTING (GraphHopper – HIKING)
+// ROUTING (OSRM public server, walking)
 // =====================
-const GRAPH_HOPPER_KEY = "bab71613-334e-47a1-8d70-135070dabc0e";
-
 let waypoints = [];
 
 const router = L.Routing.control({
   waypoints: [],
+  router: L.Routing.osrmv1({
+    serviceUrl: "https://router.project-osrm.org/route/v1",
+    profile: "foot"  // walking mode
+  }),
   addWaypoints: false,
   draggableWaypoints: false,
   routeWhileDragging: false,
   show: false,
-
-  router: L.Routing.graphHopper(GRAPH_HOPPER_KEY, {
-    urlParameters: {
-      vehicle: "hike"
-    }
-  }),
-
   lineOptions: {
-    styles: [{ color: "#c00000", weight: 4 }]
+    styles: [{ color: "#d00000", weight: 4 }]
   }
 }).addTo(map);
 
@@ -37,7 +32,7 @@ const router = L.Routing.control({
 // CLICK TO ADD WAYPOINT
 // =====================
 map.on('click', e => {
-  console.log("Clicked:", e.latlng); // DEBUG – confirms tap works
+  console.log("Clicked:", e.latlng); // debug
   waypoints.push(L.latLng(e.latlng.lat, e.latlng.lng));
   router.setWaypoints(waypoints);
 });
@@ -53,10 +48,10 @@ router.on('routesfound', e => {
 });
 
 // =====================
-// ROUTING ERROR (important)
+// ROUTING ERROR HANDLER
 // =====================
 router.on('routingerror', e => {
-  alert("Routing failed here.\nTry clicking closer to a mapped footpath.");
+  alert("Routing failed. Path may not exist in OSM.");
   console.error(e);
 });
 
@@ -93,7 +88,7 @@ function exportGPX() {
 
   let gpx =
 `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="GPX-Footpath-Planner"
+<gpx version="1.1" creator="GPX-OSRM-Planner"
 xmlns="http://www.topografix.com/GPX/1/1">
 <trk>
   <name>Walking Route</name>
