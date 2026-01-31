@@ -1,34 +1,49 @@
-// --- MAP ---
+// =====================
+// MAP
+// =====================
 const map = L.map('map').setView([51.505, -0.09], 13);
 
-L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-  attribution: '© OpenStreetMap contributors'
+// OpenTopoMap – excellent for footpaths / PROWs
+L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+  attribution: '© OpenTopoMap (CC-BY-SA)'
 }).addTo(map);
 
-// --- ROUTING ---
+// =====================
+// ROUTING (GraphHopper – FOOT)
+// =====================
+const GRAPH_HOPPER_KEY = "bab71613-334e-47a1-8d70-135070dabc0e";
+
 let waypoints = [];
 
 const router = L.Routing.control({
   waypoints: [],
-  router: L.Routing.osrmv1({
-    serviceUrl: "https://router.project-osrm.org/route/v1"
-  }),
   addWaypoints: false,
   draggableWaypoints: false,
   routeWhileDragging: false,
   show: false,
+
+  router: L.Routing.graphHopper(GRAPH_HOPPER_KEY, {
+    urlParameters: {
+      vehicle: "foot"
+    }
+  }),
+
   lineOptions: {
-    styles: [{ color: 'red', weight: 4 }]
+    styles: [{ color: "#c00000", weight: 4 }]
   }
 }).addTo(map);
 
-// --- ADD WAYPOINT BY TAP ---
+// =====================
+// ADD WAYPOINT (TAP)
+// =====================
 map.on('click', e => {
   waypoints.push(L.latLng(e.latlng.lat, e.latlng.lng));
   router.setWaypoints(waypoints);
 });
 
-// --- DISTANCE UPDATE ---
+// =====================
+// DISTANCE UPDATE
+// =====================
 router.on('routesfound', e => {
   const route = e.routes[0];
   const km = route.summary.totalDistance / 1000;
@@ -36,14 +51,18 @@ router.on('routesfound', e => {
     `Distance: ${km.toFixed(2)} km`;
 });
 
-// --- UNDO ---
+// =====================
+// UNDO
+// =====================
 function undo() {
   if (waypoints.length === 0) return;
   waypoints.pop();
   router.setWaypoints(waypoints);
 }
 
-// --- CLEAR ---
+// =====================
+// CLEAR
+// =====================
 function clearRoute() {
   waypoints = [];
   router.setWaypoints([]);
@@ -51,7 +70,9 @@ function clearRoute() {
     "Distance: 0.00 km";
 }
 
-// --- GPX EXPORT ---
+// =====================
+// GPX EXPORT
+// =====================
 function exportGPX() {
   const routes = router.getRoutes();
   if (!routes || routes.length === 0) return;
@@ -60,10 +81,10 @@ function exportGPX() {
 
   let gpx =
 `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="GPX-Web-App"
+<gpx version="1.1" creator="GPX-Footpath-Planner"
 xmlns="http://www.topografix.com/GPX/1/1">
 <trk>
-  <name>Route</name>
+  <name>Walking Route</name>
   <trkseg>
 `;
 
