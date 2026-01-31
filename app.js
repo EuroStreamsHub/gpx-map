@@ -1,58 +1,66 @@
 // =====================
-// MAP
+// MAP SETUP
 // =====================
 const map = L.map('map').setView([51.505, -0.09], 13);
 
-// OpenTopoMap – clear footpaths
+// OpenTopoMap tiles
 L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
   attribution: '© OpenTopoMap (CC-BY-SA)'
 }).addTo(map);
 
 // =====================
-// ROUTING (OSRM public server, walking)
+// DATA
 // =====================
-let waypoints = [];
+let waypoints = [];      // user clicked points
+let routeCoords = [];    // actual coordinates drawn (OSRM or straight)
+let polyline = L.polyline([], { color: '#d00000', weight: 4 }).addTo(map);
+let totalDistance = 0;
 
-const router = L.Routing.control({
-  waypoints: [],
-  router: L.Routing.osrmv1({
-    serviceUrl: "https://router.project-osrm.org/route/v1",
-    profile: "foot"  // walking mode
-  }),
-  addWaypoints: false,
-  draggableWaypoints: false,
-  routeWhileDragging: false,
-  show: false,
-  lineOptions: {
-    styles: [{ color: "#d00000", weight: 4 }]
+// =====================
+// HELPER: distance between two latlngs (meters)
+function distanceMeters(latlng1, latlng2) {
+  return latlng1.distanceTo(latlng2);
+}
+
+// =====================
+// CLICK HANDLER
+// =====================
+map.on('click', async e => {
+  const newPoint = e.latlng;
+  
+  if (waypoints.length > 0) {
+    // Try OSRM routing between last point and new point
+    const lastPoint = waypoints[waypoints.length - 1];
+    const osrmUrl = `https://router.project-osrm.org/route/v1/foot/${lastPoint.lng},${lastPoint.lat};${newPoint.lng},${newPoint.lat}?overview=full&geometries=geojson`;
+
+    try {
+      const res = await fetch(osrmUrl);
+      const data = await res.json();
+      if (data.routes && data.routes.length > 0) {
+        const coords = data.routes[0].geometry.coordinates.map(c => [c[1], c[0]]);
+        routeCoords.push(...coords);
+        polyline.setLatLngs(routeCoords);
+        totalDistance += data.routes[0].distance;
+      } else {
+        // OSRM failed → straight line
+        routeCoords.push(lastPoint, newPoint);
+        polyline.setLatLngs(routeCoords);
+        totalDistance += distanceMeters(lastPoint, newPoint);
+      }
+    } catch (err) {
+      // Network error → straight line
+      routeCoords.push(lastPoint, newPoint);
+      polyline.setLatLngs(routeCoords);
+      totalDistance += distanceMeters(lastPoint, newPoint);
+      console.error("OSRM routing failed, using straight line.", err);
+    }
   }
-}).addTo(map);
 
-// =====================
-// CLICK TO ADD WAYPOINT
-// =====================
-map.on('click', e => {
-  console.log("Clicked:", e.latlng); // debug
-  waypoints.push(L.latLng(e.latlng.lat, e.latlng.lng));
-  router.setWaypoints(waypoints);
-});
+  // Add new point
+  waypoints.push(newPoint);
 
-// =====================
-// DISTANCE UPDATE
-// =====================
-router.on('routesfound', e => {
-  const route = e.routes[0];
-  const km = route.summary.totalDistance / 1000;
-  document.getElementById("distance").innerText =
-    `Distance: ${km.toFixed(2)} km`;
-});
-
-// =====================
-// ROUTING ERROR HANDLER
-// =====================
-router.on('routingerror', e => {
-  alert("Routing failed. Path may not exist in OSM.");
-  console.error(e);
+  // Update distance display
+  document.getElementById("distance").innerText = `Distance: ${(totalDistance/1000).toFixed(2)} km`;
 });
 
 // =====================
@@ -60,8 +68,24 @@ router.on('routingerror', e => {
 // =====================
 function undo() {
   if (waypoints.length === 0) return;
+
+  // Remove last segment
   waypoints.pop();
-  router.setWaypoints(waypoints);
+
+  if (routeCoords.length >= 2) {
+    // Remove last segment coordinates
+    routeCoords = routeCoords.slice(0, routeCoords.length - 2);
+  }
+
+  polyline.setLatLngs(routeCoords);
+
+  // Recalculate total distance
+  totalDistance = 0;
+  for (let i=1; i<routeCoords.length; i++) {
+    totalDistance += distanceMeters(L.latLng(routeCoords[i-1]), L.latLng(routeCoords[i]));
+  }
+
+  document.getElementById("distance").innerText = `Distance: ${(totalDistance/1000).toFixed(2)} km`;
 }
 
 // =====================
@@ -69,38 +93,34 @@ function undo() {
 // =====================
 function clearRoute() {
   waypoints = [];
-  router.setWaypoints([]);
-  document.getElementById("distance").innerText =
-    "Distance: 0.00 km";
+  routeCoords = [];
+  polyline.setLatLngs([]);
+  totalDistance = 0;
+  document.getElementById("distance").innerText = "Distance: 0.00 km";
 }
 
 // =====================
 // GPX EXPORT
 // =====================
 function exportGPX() {
-  const routes = router.getRoutes();
-  if (!routes || routes.length === 0) {
+  if (routeCoords.length === 0) {
     alert("No route to export");
     return;
   }
 
-  const coords = routes[0].coordinates;
-
-  let gpx =
-`<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="GPX-OSRM-Planner"
+  let gpx = `<?xml version="1.0" encoding="UTF-8"?>
+<gpx version="1.1" creator="Hybrid-GPX-Planner"
 xmlns="http://www.topografix.com/GPX/1/1">
 <trk>
-  <name>Walking Route</name>
+  <name>Hybrid Route</name>
   <trkseg>
 `;
 
-  coords.forEach(c => {
-    gpx += `    <trkpt lat="${c.lat}" lon="${c.lng}"></trkpt>\n`;
+  routeCoords.forEach(c => {
+    gpx += `    <trkpt lat="${c[0]}" lon="${c[1]}"></trkpt>\n`;
   });
 
-  gpx +=
-`  </trkseg>
+  gpx += `  </trkseg>
 </trk>
 </gpx>`;
 
