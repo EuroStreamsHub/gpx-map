@@ -1,138 +1,155 @@
-<!DOCTYPE html>
-<html>
+<!DOCTYPE html><html lang="en">
 <head>
-    <title>OS-Style Route Planner</title>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
-    <style>
-        body { margin: 0; padding: 0; font-family: sans-serif; }
-        #map { height: 85vh; width: 100vw; background: #e0e0e0; }
-        .ui-panel { 
-            height: 15vh; 
-            display: flex; 
-            align-items: center; 
-            justify-content: space-around; 
-            background: #2c3e50; 
-            color: white; 
-            padding: 0 20px;
+  <meta charset="utf-8" />
+  <title>OSM Hiking Router (GraphHopper + Tracestack)</title>
+  <meta name="viewport" content="width=device-width, initial-scale=1" />  <!-- MapLibre GL JS -->  <link href="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.css" rel="stylesheet" />
+  <script src="https://unpkg.com/maplibre-gl@3.6.2/dist/maplibre-gl.js"></script>  <style>
+    body { margin: 0; padding: 0; }
+    #map { width: 100vw; height: 100vh; }
+    .hint {
+      position: absolute;
+      top: 10px;
+      left: 10px;
+      background: rgba(255,255,255,0.9);
+      padding: 8px 12px;
+      font-family: sans-serif;
+      font-size: 14px;
+      border-radius: 6px;
+      box-shadow: 0 1px 4px rgba(0,0,0,0.2);
+    }
+  </style></head>
+<body><div id="map"></div>
+<div class="hint">Click to add points. Route snaps to OSM paths.</div><script>
+  /**************** CONFIG ****************/
+
+  // IMPORTANT: replace with your *restricted* GraphHopper API key
+  const GRAPHOPPER_KEY = "60e48bae-2871-4d6c-9d2b-785d84fecc58";
+
+  const ROUTE_PROFILE = "foot"; // foot | bike | car
+
+  /****************************************/
+
+  const map = new maplibregl.Map({
+    container: 'map',
+    style: {
+      version: 8,
+      sources: {
+        tracestack: {
+          type: 'raster',
+          tiles: [
+            'https://tiles.tracestack.com/topo/{z}/{x}/{y}.png'
+          ],
+          tileSize: 256,
+          attribution: '© OpenStreetMap contributors'
         }
-        .stats { font-size: 1.2rem; }
-        button { 
-            padding: 12px 24px; 
-            background: #27ae60; 
-            color: white; 
-            border: none; 
-            border-radius: 8px; 
-            cursor: pointer; 
-            font-weight: bold;
+      },
+      layers: [
+        {
+          id: 'tracestack',
+          type: 'raster',
+          source: 'tracestack'
         }
-        button:hover { background: #219150; }
-        button.clear { background: #c0392b; }
-    </style>
-</head>
-<body>
+      ]
+    },
+    center: [8.5417, 47.3769], // Zurich
+    zoom: 13
+  });
 
-    <div id="map"></div>
-    
-    <div class="ui-panel">
-        <div class="stats">Distance: <span id="dist">0.00</span> km</div>
-        <button onclick="exportGPX()">Export GPX</button>
-        <button class="clear" onclick="clearRoute()">Clear All</button>
-    </div>
+  let points = [];
 
-    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
-    <script>
-        const API_KEY = 'bab71613-334e-47a1-8d70-135070dabc0e';
-        
-        // 1. Initialize Map
-        const map = L.map('map').setView([53.3811, -1.4701], 13); // Sheffield
+  map.on('load', () => {
+    map.addSource('route', {
+      type: 'geojson',
+      data: emptyFeature()
+    });
 
-        // 2. Load the Map Layer (Using Standard OSM for maximum reliability)
-        L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
-            attribution: '© OpenStreetMap contributors'
-        }).addTo(map);
+    map.addLayer({
+      id: 'route-line',
+      type: 'line',
+      source: 'route',
+      paint: {
+        'line-width': 4,
+        'line-color': '#e11d48'
+      }
+    });
 
-        let legs = []; 
-        let polyline = L.polyline([], {color: '#3498db', weight: 6, opacity: 0.8}).addTo(map);
-        let totalDistance = 0;
+    map.addSource('markers', {
+      type: 'geojson',
+      data: emptyFeatureCollection()
+    });
 
-        // 3. Click to Route Logic
-        map.on('click', async (e) => {
-            const newPoint = [e.latlng.lat, e.latlng.lng];
-            
-            if (legs.length > 0) {
-                const lastLeg = legs[legs.length - 1];
-                const lastPoint = lastLeg[lastLeg.length - 1];
+    map.addLayer({
+      id: 'marker-points',
+      type: 'circle',
+      source: 'markers',
+      paint: {
+        'circle-radius': 6,
+        'circle-color': '#2563eb',
+        'circle-stroke-width': 2,
+        'circle-stroke-color': '#ffffff'
+      }
+    });
+  });
 
-                const url = `https://graphhopper.com/api/1/route?key=${API_KEY}`;
-                
-                const body = {
-                    "points": [[lastPoint[1], lastPoint[0]], [newPoint[1], newPoint[0]]],
-                    "profile": "hike",
-                    "points_encoded": false,
-                    "ch.disable": true
-                };
+  map.on('click', async (e) => {
+    points.push({ lat: e.lngLat.lat, lng: e.lngLat.lng });
+    updateMarkers();
 
-                try {
-                    const res = await fetch(url, {
-                        method: 'POST',
-                        headers: { 'Content-Type': 'application/json' },
-                        body: JSON.stringify(body)
-                    });
-                    const data = await res.json();
+    if (points.length >= 2) {
+      const geometry = await fetchRoute(points);
+      if (geometry) updateRoute(geometry);
+    }
+  });
 
-                    if (data.paths && data.paths.length > 0) {
-                        const path = data.paths[0];
-                        const snappedCoords = path.points.coordinates.map(c => [c[1], c[0]]);
-                        legs.push(snappedCoords);
-                        totalDistance += path.distance;
-                    } else {
-                        throw new Error();
-                    }
-                } catch (err) {
-                    // If footpath fails, do a straight line
-                    legs.push([[lastPoint[0], lastPoint[1]], [newPoint[0], newPoint[1]]]);
-                }
-            } else {
-                legs.push([newPoint]);
-            }
+  async function fetchRoute(points) {
+    const params = new URLSearchParams({
+      profile: ROUTE_PROFILE,
+      points_encoded: 'false',
+      key: GRAPHOPPER_KEY
+    });
 
-            render();
-        });
+    points.forEach(p => {
+      params.append('point', `${p.lat},${p.lng}`);
+    });
 
-        function render() {
-            const allCoords = legs.flat();
-            polyline.setLatLngs(allCoords);
-            document.getElementById('dist').innerText = (totalDistance / 1000).toFixed(2);
+    const url = `https://graphhopper.com/api/1/route?${params.toString()}`;
+
+    try {
+      const res = await fetch(url);
+      const json = await res.json();
+      return json.paths[0].points;
+    } catch (err) {
+      console.error('Routing error:', err);
+      return null;
+    }
+  }
+
+  function updateRoute(geometry) {
+    map.getSource('route').setData({
+      type: 'Feature',
+      geometry
+    });
+  }
+
+  function updateMarkers() {
+    map.getSource('markers').setData({
+      type: 'FeatureCollection',
+      features: points.map(p => ({
+        type: 'Feature',
+        geometry: {
+          type: 'Point',
+          coordinates: [p.lng, p.lat]
         }
+      }))
+    });
+  }
 
-        function clearRoute() {
-            legs = [];
-            totalDistance = 0;
-            render();
-        }
+  function emptyFeature() {
+    return { type: 'Feature', geometry: { type: 'LineString', coordinates: [] } };
+  }
 
-        function exportGPX() {
-            const coords = polyline.getLatLngs();
-            if (coords.length < 2) return alert("Click on the map to start your route!");
-            
-            let gpx = `<?xml version="1.0" encoding="UTF-8"?>
-<gpx version="1.1" creator="MyPlanner" xmlns="http://www.topografix.com/GPX/1/1">
-  <trk><name>My Hike</name><trkseg>`;
-            
-            coords.forEach(p => {
-                gpx += `\n    <trkpt lat="${p.lat}" lon="${p.lng}"></trkpt>`;
-            });
-
-            gpx += `\n  </trkseg></trk></gpx>`;
-
-            const blob = new Blob([gpx], {type: 'application/gpx+xml'});
-            const link = document.createElement('a');
-            link.href = URL.createObjectURL(blob);
-            link.download = 'route.gpx';
-            link.click();
-        }
-    </script>
-</body>
+  function emptyFeatureCollection() {
+    return { type: 'FeatureCollection', features: [] };
+  }
+</script></body>
 </html>
